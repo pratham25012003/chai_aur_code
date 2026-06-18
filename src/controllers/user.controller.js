@@ -53,11 +53,11 @@ const registerUser = asyncHandler( async (req, res)=>{
         userName: userName.toLowerCase()
     })
  
-    // .select("-password -refresToken") means muzhe tum jab user doge findById karke 
+    // .select("-password -refreshToken") means muzhe tum jab user doge findById karke 
     //                                   tab password and refreshToken mat dena kyu ki 
     //                                   client kya hi karega password and refresh token dekh ke
 
-    const createdUser = await User.findById(user._id).select("-password -refresToken");
+    const createdUser = await User.findById(user._id).select("-password -refreshToken");
 
     if(!createdUser){
         throw new ApiError(500, "Something went wrong while registering the user")
@@ -67,6 +67,84 @@ const registerUser = asyncHandler( async (req, res)=>{
         new ApiResponse(200, createdUser, "User Registered Successfully")
     )
 
+});
+
+const loginUser = asyncHandler( async (req, res)=>{
+    const {email, password} = req.body;
+    console.log("body : ", req.body);
+
+    if(!email || !password){
+        throw new ApiError(400, "Please Provide email and password")
+    }
+
+    const user = await User.findOne({email});
+    console.log("user : ", user);
+
+    if(!user){
+        throw new ApiError(401, "User not found");
+    }
+
+    const isPasswordCorrect = await user.isPasswordCorrect(password)
+    console.log("isPasswordCorrect",isPasswordCorrect)
+
+    if(!isPasswordCorrect){
+        throw new ApiError(401, "Incorrect password")
+    }
+
+    const accessToken = await user.generateAccessToken()
+    const refreshToken = await user.generateRefreshToken()
+
+    user.refreshToken = refreshToken;
+    user.save({ validateBeforeSave: false })
+
+    const loggedInUser = await User.findById(user._id).select("-password -refreshToken")
+
+    const options = {
+        // byDefault coockie ko koi bhi modified kar sakta hai frontend se but httpOnly : true and secure : true 
+        // se sirf server se modified kar sakte hai 
+        httpOnly : true,  
+        secure : true
+    }
+
+
+    // to set cookie  => cookie(name, value, options) => eg => cookie(accessToken, accessToken, options)
+
+   return res
+   .status(201)
+   .cookie("accessToken", accessToken, options)
+   .cookie("refreshToken", refreshToken, options)
+   .json(
+        new ApiResponse(200, {user: loggedInUser, accessToken, refreshToken}, "User Logged In Successfully")
+   )
+
+});
+
+const logOut = asyncHandler( async (req, res) => {
+    await User.findByIdAndUpdate(
+        req.user._id,
+        {
+            $set:{
+                refreshToken: undefined
+            }
+        },
+        {
+            //  return upadted document, new : true is depricated, 
+            // "after" means update ke baad vala document 
+            // "before" means update ke pehale wala document
+            returnDocument: "after"
+        }
+    )
+
+    const options = {
+        httpOnly: true,
+        secure: true
+    };
+
+    return res
+    .status(200)
+    .clearCookie("accessToken", options)
+    .clearCookie("refreshToken", options)
+    .json( new ApiResponse(200, {}, "User logged Out"))
 })
 
-export {registerUser}
+export {registerUser, loginUser, logOut}
